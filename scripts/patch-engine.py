@@ -7,6 +7,10 @@
 # - Spare receiver ports: when 8771 is held by another program the receiver
 #   takes the next free one of 8772-8779 (advertised in the mDNS SRV record,
 #   so the iPhone follows), instead of waiting for 8771 forever.
+# - Sender presents no TLS client certificate.  An iPhone rejects a self-signed
+#   one with SSLV3_ALERT_BAD_CERTIFICATE on both /Discover and /Ask; AirDrop
+#   receivers accept connections without a client cert, and identity rides in
+#   the plist record instead.  Without this the send direction cannot work.
 import pathlib
 import sys
 
@@ -55,3 +59,33 @@ if new not in text:
 if changed:
     engine.write_text(text, encoding='utf-8')
 print('engine patched')
+
+# sender.py: drop the client certificate from the TLS context.  The receiver
+# rejects our self-signed cert; a sender without an Apple-issued identity is
+# expected to present none at all.
+sender = pathlib.Path(sys.argv[1]) / 'sender.py'
+text = sender.read_text(encoding='utf-8')
+old = NL.join([
+    '    certificate, key = identity.ensure_self_signed(keys_dir)',
+    '    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)',
+    '    # A receiver visible to everyone presents a certificate nothing vouches',
+    '    # for, and takes ours the same way.',
+    '    context.check_hostname = False',
+    '    context.verify_mode = ssl.CERT_NONE',
+    '    context.load_cert_chain(certificate, key)',
+])
+new = NL.join([
+    '    # Present no client certificate.  An iPhone in Everyone mode rejects a',
+    '    # self-signed one with SSLV3_ALERT_BAD_CERTIFICATE on every connection.',
+    '    # AirDrop receivers accept a connection with no client cert; identity',
+    '    # is carried in the plist record, not in the TLS client certificate.',
+    '    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)',
+    '    context.check_hostname = False',
+    '    context.verify_mode = ssl.CERT_NONE',
+])
+if new not in text:
+    if old not in text:
+        sys.exit('sender.py: the client_context body moved; update patch-engine.py')
+    text = text.replace(old, new, 1)
+    sender.write_text(text, encoding='utf-8')
+    print('sender patched')
