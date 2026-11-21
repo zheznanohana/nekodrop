@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -586,11 +587,25 @@ int main(int argc, char **argv) {
       std::vector<uint8_t> frame;
       TxRate rate;
       bool data;
+      int slot = -1;            /* firmware TX ring slot while in flight */
+      bool acked = false;       /* TX status said the peer got it */
+      bool abandon = false;     /* retry window/attempts exhausted */
+      uint64_t first_us = 0;    /* first transmission, for the retry window */
+      uint64_t sent_us = 0;     /* last transmission, for the stall escape */
+      uint64_t next_us = 0;     /* backoff before a resend */
+      unsigned attempts = 0;
     };
     std::deque<Unicast> uq;
-    int inflight = -1;
-    unsigned attempts = 0;
-    uint64_t first_us = 0, not_before_us = 0, sent_us = 0;
+    /* The firmware data ring holds 128 (AX210) / 256 entries. Sending one
+     * frame and waiting for its TX-status reply serialises a round trip into
+     * every packet (~1 ms), which caps an AWDL upload near 1 MB/s: a large
+     * file then overflows uq (1024), drops frames and the peer's TCP/TLS
+     * connection dies. Keep a small window of frames in flight instead; the
+     * station path already sends that way. Management frames keep their
+     * per-frame retry so ADDBA answers stay reliable. */
+    constexpr unsigned kTxWindow = 8;
+    constexpr size_t kQueueLimit = 4096; /* large uploads must not overflow at 1024 */
+    unsigned inflight = 0;
     uint64_t resent = 0, gave_up = 0, uq_dropped = 0;
     awdl::RateLadder ladder;
     const bool wide80 = opt.channel > 14 && opt.width >= 80;
@@ -613,43 +628,69 @@ int main(int argc, char **argv) {
       return r;
     };
     dev.set_tx_status_handler([&](unsigned slot, bool acked) {
-      if (inflight < 0 || slot != static_cast<unsigned>(inflight) || uq.empty()) return;
-      inflight = -1;
-      const uint64_t now = now_us();
-      if (uq.front().data && attempts == 1) ladder.note(acked, wide80);
-      if (acked) {
-        uq.pop_front();
-        attempts = 0;
+      /* Find the frame this slot belongs to. With a window several frames are
+       * outstanding; only their own status may retire or retry them. */
+      for (auto &f : uq) {
+        if (f.slot < 0 || slot != static_cast<unsigned>(f.slot)) continue;
+        if (inflight) --inflight;
+        f.slot = -1;
+        const uint64_t now = now_us();
+        if (f.data && f.attempts == 1) ladder.note(acked, wide80);
+        if (acked) {
+          f.acked = true; /* the pump pops completed frames from the front */
+          return;
+        }
+        if (now - f.first_us >= awdl::kResendWindowUS ||
+            f.attempts >= awdl::kResendMaxAttempts) {
+          f.abandon = true;
+          gave_up++;
+          return;
+        }
+        f.frame[1] |= 0x08; /* retry */
+        f.next_us = now + awdl::resend_backoff_us(f.attempts);
+        resent++;
         return;
       }
-      if (now - first_us >= awdl::kResendWindowUS || attempts >= awdl::kResendMaxAttempts) {
-        uq.pop_front();
-        attempts = 0;
-        gave_up++;
-        return;
-      }
-      uq.front().frame[1] |= 0x08; /* retry */
-      not_before_us = now + awdl::resend_backoff_us(attempts);
-      resent++;
     });
     const auto pump = [&] {
       const uint64_t now = now_us();
-      if (inflight >= 0) {
-        if (now - sent_us < 1000000) return false;
-        inflight = -1; /* no status in a second: do not stall behind it */
+      /* Retire completed/abandoned frames strictly from the front so the peer
+       * sees sequence numbers in order. */
+      bool removed = false;
+      while (!uq.empty() && (uq.front().acked || uq.front().abandon)) {
+        uq.pop_front();
+        removed = true;
       }
-      if (uq.empty() || now < not_before_us) return false;
-      if (!attempts) {
-        first_us = now;
-        if (uq.front().data) uq.front().rate = data_rate();
+      /* A frame whose TX status never came back must not hold a slot
+       * forever (some firmware replies are dropped). Release it so the
+       * retry path can send it again. */
+      for (auto &f : uq) {
+        if (f.slot >= 0 && now - f.sent_us >= 1000000) {
+          if (inflight) --inflight;
+          f.slot = -1;
+          f.next_us = now;
+          resent++;
+        }
       }
-      const int slot = dev.transmit_slot(uq.front().frame.data(), uq.front().frame.size(),
-                                         uq.front().rate);
-      if (slot < 0) return false;
-      inflight = slot;
-      attempts++;
-      sent_us = now;
-      return true;
+      /* Fill the window, skipping frames that are still waiting on a status
+       * or on their retry backoff. */
+      bool sent = false;
+      for (auto &f : uq) {
+        if (inflight >= kTxWindow) break;
+        if (f.slot >= 0 || now < f.next_us) continue;
+        if (!f.attempts) {
+          f.first_us = now;
+          if (f.data) f.rate = data_rate();
+        }
+        const int slot = dev.transmit_slot(f.frame.data(), f.frame.size(), f.rate);
+        if (slot < 0) break; /* ring full: try again next tick */
+        f.slot = slot;
+        f.attempts++;
+        f.sent_us = now;
+        inflight++;
+        sent = true;
+      }
+      return sent || removed;
     };
     const auto may_send = [&] {
       const uint32_t cf = dev.channel_flags(dev.channel());
@@ -687,7 +728,7 @@ int main(int argc, char **argv) {
           if (!may_send()) {
             tx_held_passive++; /* no initiating on a passive channel */
           } else if (unicast) {
-            if (uq.size() >= 1024) uq_dropped++;
+            if (uq.size() >= kQueueLimit) uq_dropped++;
             else uq.push_back({std::vector<uint8_t>(frame, frame + len), rate, data});
           } else {
             dev.transmit(frame, len, rate);
@@ -765,7 +806,7 @@ int main(int argc, char **argv) {
         if (sta->state() != WifiStation::State::Running) busy = true;
       }
       if (pump()) busy = true;
-      if (inflight >= 0 || !uq.empty()) busy = true;
+      if (inflight > 0 || !uq.empty()) busy = true;
       if (busy) {
         idle_rounds = 0;
       } else if (++idle_rounds > 200) {
