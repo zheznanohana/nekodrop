@@ -239,7 +239,8 @@ What to check when testing: the diagnostic report's **Discovery timing** table s
 4. **AirDrop.** A Python engine speaks AirDrop over `awdl0`: mDNS discovery, HTTPS on port 8771 (spare ports 8772-8779), the `/Discover`, `/Ask` and `/Upload` flow, and the BLE beacon used for sending.
 5. **Internet.** Frames from the station MAC are bridged to the TAP adapter "nekodrop". Windows treats it as Ethernet and gets an address by DHCP.
 
-Design notes: [docs/DESIGN.md](docs/DESIGN.md) (driver, DMA, risks) · [docs/CLIENT.md](docs/CLIENT.md) (service, client, modes).
+Design notes: [docs/DESIGN.md](docs/DESIGN.md) (driver, DMA, risks) · [docs/CLIENT.md](docs/CLIENT.md) (service, client, modes)  · [docs/TESTING.md](docs/TESTING.md) (throughput test method)
+
 
 ## Troubleshooting
 
