@@ -105,8 +105,9 @@ foreach ($script in 'install.ps1', 'uninstall.ps1', 'setup-tap.ps1', 'restore.ps
   & powershell.exe -NoProfile -Command "`$e = `$null; [void][Management.Automation.Language.Parser]::ParseFile('$stage\$script', [ref]`$null, [ref]`$e); if (`$e) { `$e | ForEach-Object { `$_.ToString() }; exit 1 }"
   if ($LASTEXITCODE -ne 0) { throw "$script does not parse" }
 }
-# Offline installer/rollback/report self-tests under Windows PowerShell 5.1 (no card or admin rights needed).
-foreach ($script in 'install.ps1', 'restore.ps1', 'report.ps1') {
+# Offline installer/rollback/report/uninstall self-tests under Windows PowerShell 5.1
+# (no card or admin rights needed).
+foreach ($script in 'install.ps1', 'uninstall.ps1', 'restore.ps1', 'report.ps1') {
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$stage\$script" -SelfTest
   if ($LASTEXITCODE -ne 0) { throw "$script self-test failed ($LASTEXITCODE)" }
 }

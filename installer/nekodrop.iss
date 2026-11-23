@@ -62,7 +62,9 @@ Filename: "{app}\nekodrop.exe"; Parameters: "--background"; Flags: nowait runaso
 
 [UninstallRun]
 Filename: "{app}\nekodrop.exe"; Parameters: "--unregister"; Flags: waituntilterminated skipifdoesntexist runhidden; RunOnceId: "nekodrop-unregister"
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\uninstall.ps1"" -Target ""{app}"""; \
+; -Inno keeps the running uninstaller alive and lets Setup remove the shortcuts,
+; the Add/Remove Programs entry and its own files after uninstall.ps1 returns.
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\uninstall.ps1"" -Target ""{app}"" -Inno"; \
   Flags: runhidden waituntilterminated; RunOnceId: "nekodrop-uninstall"
 
 [Code]
