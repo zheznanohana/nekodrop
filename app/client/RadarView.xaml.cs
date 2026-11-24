@@ -422,7 +422,8 @@ public partial class RadarView : UserControl
         if (files.Count == 0)
         {
             var dlg = new Microsoft.Win32.OpenFileDialog { Multiselect = true, Title = L.T("pick.files") };
-            if (dlg.ShowDialog(Window.GetWindow(this)) != true) return;
+            var owner = Window.GetWindow(this);
+            if (owner is null || Native.ShowDialog(owner, dlg, dlg.Title) != true) return;
             foreach (var f in dlg.FileNames) files.Add(f);
         }
         A.SendTo(d);

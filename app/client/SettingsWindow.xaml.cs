@@ -280,7 +280,7 @@ public partial class SettingsWindow : Window
     void Browse_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFolderDialog { Title = L.T("pick.folder"), InitialDirectory = _folder };
-        if (dlg.ShowDialog(this) != true) return;
+        if (Native.ShowDialog(this, dlg, dlg.Title) != true) return;
         _folder = dlg.FolderName;
         FolderText.Text = _folder;
     }
@@ -385,7 +385,7 @@ public partial class SettingsWindow : Window
     void ImportMac_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFolderDialog { Title = L.T("aid.pickMac") };
-        if (dlg.ShowDialog(this) != true) return;
+        if (Native.ShowDialog(this, dlg, dlg.Title) != true) return;
         var why = AppleId.ImportFromMac(dlg.FolderName, null);
         if (why == "need_passphrase")
         {
@@ -401,7 +401,7 @@ public partial class SettingsWindow : Window
     void ImportContacts_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFileDialog { Title = L.T("aid.pickVcf"), Filter = "vCard (*.vcf)|*.vcf" };
-        if (dlg.ShowDialog(this) != true) return;
+        if (Native.ShowDialog(this, dlg, dlg.Title) != true) return;
         try
         {
             var people = AppleId.ImportContacts(dlg.FileName);

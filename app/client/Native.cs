@@ -129,6 +129,138 @@ public static class Native
     }
 
     /// <summary>
+    /// Puts a fixed-size panel in the bottom-right corner of the work area of
+    /// the screen under the mouse. Positions in physical pixels so this also
+    /// works before the window has a PresentationSource and when the target
+    /// screen has a different DPI from the window's current screen.
+    /// </summary>
+    public static void DockBottomRight(Window w, double width, double tall, double gap)
+    {
+        var cursor = System.Windows.Forms.Cursor.Position;
+        var screen = System.Windows.Forms.Screen.FromPoint(cursor);
+        var scale = DpiScaleAt(cursor, w);
+        var widthPx = (int)Math.Round(width * scale);
+        var gapPx = (int)Math.Round(gap * scale);
+        var maxHeight = Math.Max(1, (screen.WorkingArea.Height - 2 * gapPx) / scale);
+        var height = Math.Min(tall, maxHeight);
+        var heightPx = (int)Math.Round(height * scale);
+        var left = screen.WorkingArea.Right - widthPx - gapPx;
+        var top = screen.WorkingArea.Bottom - heightPx - gapPx;
+        w.Width = width;
+        w.Height = height;
+        SetWindowPos(new WindowInteropHelper(w).Handle, IntPtr.Zero, left, top, widthPx, heightPx,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct POINT { public int X, Y; }
+
+    [DllImport("user32.dll")]
+    static extern IntPtr MonitorFromPoint(POINT point, uint flags);
+
+    [DllImport("shcore.dll")]
+    static extern int GetDpiForMonitor(IntPtr monitor, int dpiType, out uint dpiX, out uint dpiY);
+
+    [DllImport("user32.dll")]
+    static extern uint GetDpiForWindow(IntPtr hwnd);
+
+    static double DpiScaleAt(System.Drawing.Point point, Window w)
+    {
+        var monitor = MonitorFromPoint(new POINT { X = point.X, Y = point.Y }, 2 /* nearest */);
+        if (monitor != IntPtr.Zero && GetDpiForMonitor(monitor, 0 /* effective */, out var dpiX, out _) == 0 && dpiX > 0)
+            return dpiX / 96.0;
+        var dpi = GetDpiForWindow(new WindowInteropHelper(w).Handle);
+        return dpi > 0 ? dpi / 96.0 : 1.0;
+    }
+
+    /// <summary>
+    /// Shows a native file/folder dialog, then keeps it on the owner's screen.
+    /// Windows centres these dialogs on the owner window, but the panel is a
+    /// narrow window glued to the right edge; at 125 % the dialog is wider than
+    /// the remaining space and is pushed across the monitor seam. Move it to
+    /// the centre of the owner's work area after it becomes visible.
+    /// </summary>
+    public static bool ShowDialog(Window owner, CommonDialog dialog, string title)
+    {
+        var ownerHwnd = new WindowInteropHelper(owner).Handle;
+        var work = System.Windows.Forms.Screen.FromHandle(ownerHwnd).WorkingArea;
+        using var stop = new System.Threading.CancellationTokenSource();
+        var thread = new System.Threading.Thread(() =>
+        {
+            for (var attempts = 0; attempts < 100 && !stop.IsCancellationRequested; attempts++)
+            {
+                System.Threading.Thread.Sleep(40);
+                var hwnd = FindDialog((uint)Environment.ProcessId, title);
+                if (hwnd == IntPtr.Zero) continue;
+                GetWindowRect(hwnd, out var r);
+                var width = r.Right - r.Left;
+                var height = r.Bottom - r.Top;
+                if (width <= 200 || height <= 200) continue;
+                var fitWidth = Math.Min(width, work.Width - 16);
+                var fitHeight = Math.Min(height, work.Height - 16);
+                var x = work.Left + (work.Width - fitWidth) / 2;
+                var y = work.Top + (work.Height - fitHeight) / 2;
+                SetWindowPos(hwnd, IntPtr.Zero, x, y, fitWidth, fitHeight,
+                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+                return;
+            }
+        })
+        {
+            IsBackground = true,
+        };
+        thread.Start();
+        try { return dialog.ShowDialog(owner) == true; }
+        finally
+        {
+            stop.Cancel();
+            thread.Join(200);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct RECT { public int Left, Top, Right, Bottom; }
+
+    delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetWindowText(IntPtr hwnd, System.Text.StringBuilder text, int max);
+
+    [DllImport("user32.dll")]
+    static extern bool IsWindowVisible(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+    const uint SWP_NOZORDER = 0x0004;
+    const uint SWP_NOACTIVATE = 0x0010;
+    const uint SWP_NOOWNERZORDER = 0x0200;
+
+    static IntPtr FindDialog(uint processId, string title)
+    {
+        var found = IntPtr.Zero;
+        EnumWindows((hwnd, _) =>
+        {
+            GetWindowThreadProcessId(hwnd, out var pid);
+            if (pid != processId || !IsWindowVisible(hwnd)) return true;
+            var text = new System.Text.StringBuilder(256);
+            if (GetWindowText(hwnd, text, text.Capacity) <= 0) return true;
+            if (!string.Equals(text.ToString(), title, StringComparison.Ordinal)) return true;
+            found = hwnd;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    /// <summary>
     /// A window taller or wider than the screen (a laptop at 150 % has 720
     /// units) is cut off at the bottom: shrink it to the work area, centred.
     /// </summary>

@@ -190,7 +190,7 @@ public partial class MainWindow : Window
     void Add_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFileDialog { Multiselect = true, Title = L.T("pick.files") };
-        if (Modal(() => dlg.ShowDialog(this)) == true)
+        if (Modal(() => Native.ShowDialog(this, dlg, dlg.Title)) == true)
             foreach (var f in dlg.FileNames) if (!A.Model.Files.Contains(f)) A.Model.Files.Add(f);
     }
 
@@ -287,14 +287,29 @@ public partial class MainWindow : Window
     /// </summary>
     public void DockRight()
     {
-        new System.Windows.Interop.WindowInteropHelper(this).EnsureHandle();
-        var a = Native.WorkArea(this);
-        const double gap = 12, tall = 700;
-        Height = Math.Min(tall, a.Height - 2 * gap);
-        Left = a.Right - Width - gap;
-        Top = a.Bottom - Height - gap;
+        // Before the first Show there is no PresentationSource yet, so
+        // TransformFromDevice is still Identity and WorkArea would be read at
+        // 96 dpi. On a 125 % screen that puts the panel one screen to the right
+        // until it is hidden and shown again. Wait for the HWND to be connected
+        // to its composition target, then place it with the real DPI.
+        if (PresentationSource.FromVisual(this) is null)
+        {
+            if (!_dockPending)
+            {
+                _dockPending = true;
+                SourceInitialized += (_, _) =>
+                {
+                    _dockPending = false;
+                    DockRight();
+                };
+            }
+            return;
+        }
+        Native.DockBottomRight(this, Width, 700, 12);
         ShownAt = DateTime.UtcNow;
     }
+
+    bool _dockPending;
 
     /// <summary>A file or folder dialog takes the focus without the panel going away.</summary>
     T Modal<T>(Func<T> show)
@@ -322,7 +337,7 @@ public partial class MainWindow : Window
     void ChangeFolder_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFolderDialog { Title = L.T("pick.folder"), InitialDirectory = A.Settings.SaveFolder };
-        if (Modal(() => dlg.ShowDialog(this)) != true) return;
+        if (Modal(() => Native.ShowDialog(this, dlg, dlg.Title)) != true) return;
         A.Settings.SaveFolder = dlg.FolderName;
         A.Settings.Save();
         A.Engine.Apply(A.Settings);
