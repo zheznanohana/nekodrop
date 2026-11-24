@@ -301,6 +301,14 @@
                   <TextBlock Text="{local:T set.updates.hint}" Style="{StaticResource Sub12}" Margin="0,2,0,0"/>
                 </StackPanel>
               </DockPanel>
+              <Border Style="{StaticResource Rule}" Margin="0,12"/>
+              <DockPanel>
+                <CheckBox x:Name="DeleteInstallerBox" DockPanel.Dock="Right" Style="{StaticResource WinToggle}" Margin="12,0,0,0"/>
+                <StackPanel>
+                  <TextBlock Text="{local:T set.deleteInstaller}" FontSize="13"/>
+                  <TextBlock Text="{local:T set.deleteInstallerHint}" Style="{StaticResource Sub12}" Margin="0,2,0,0"/>
+                </StackPanel>
+              </DockPanel>
             </StackPanel>
           </Border>
         </StackPanel>

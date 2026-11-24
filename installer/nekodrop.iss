@@ -68,6 +68,17 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
   Flags: runhidden waituntilterminated; RunOnceId: "nekodrop-uninstall"
 
 [Code]
+var
+  InstallFailed: Boolean;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  if InstallFailed then
+    Result := 1
+  else
+    Result := 0;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Code: Integer;
@@ -84,6 +95,7 @@ begin
     Code := -1;
   if Code <> 0 then
   begin
+    InstallFailed := True;
     if not LoadStringFromFile(ExpandConstant('{commonappdata}\nekodrop\install-error.txt'), Err) then
       Err := 'install.ps1 exit code ' + IntToStr(Code);
     SuppressibleMsgBox(FmtMessage(CustomMessage('Failed'), [String(Err), Log]), mbError, MB_OK, IDOK);

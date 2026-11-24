@@ -202,7 +202,7 @@ public static class Updater
     public static async Task<Release?> FindNewer(bool includePreview) => (await Check(includePreview)).Release;
 
     /// <summary>Downloads, verifies and starts the installer. Returns "" or why not.</summary>
-    public static async Task<string> Install(Release r, IProgress<int>? progress = null)
+    public static async Task<string> Install(Release r, IProgress<int>? progress = null, bool deleteAfterInstall = true)
     {
         var dir = Path.Combine(Path.GetTempPath(), "nekodrop-update");
         Directory.CreateDirectory(dir);
@@ -232,7 +232,68 @@ public static class Updater
             return "the download does not match the published SHA-256";
         }
         // The installer closes this app itself (CloseApplications) and starts it again afterwards.
-        Process.Start(new ProcessStartInfo(path, "/SILENT /NORESTART") { UseShellExecute = true });
+        StartInstaller(path, deleteAfterInstall);
         return "";
     }
+
+    /// <summary>
+    /// Starts the installer. With deleteAfterInstall, a detached PowerShell helper
+    /// waits for the installer and removes the setup file only after a successful
+    /// exit. The app is closed by the installer itself, so the helper must live
+    /// outside this process.
+    /// </summary>
+    static void StartInstaller(string path, bool deleteAfterInstall)
+    {
+        if (!deleteAfterInstall)
+        {
+            Process.Start(new ProcessStartInfo(path, "/SILENT /NORESTART") { UseShellExecute = true });
+            return;
+        }
+
+        string? helper = null;
+        try
+        {
+            helper = Path.Combine(Path.GetDirectoryName(path)!, $"{Path.GetFileNameWithoutExtension(path)}-cleanup.ps1");
+            File.WriteAllText(helper, CleanupScript);
+            var powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+            var psi = new ProcessStartInfo(powershell)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            };
+            psi.ArgumentList.Add("-NoProfile");
+            psi.ArgumentList.Add("-NonInteractive");
+            psi.ArgumentList.Add("-ExecutionPolicy");
+            psi.ArgumentList.Add("Bypass");
+            psi.ArgumentList.Add("-File");
+            psi.ArgumentList.Add(helper);
+            psi.ArgumentList.Add("-Installer");
+            psi.ArgumentList.Add(path);
+            Process.Start(psi);
+        }
+        catch (Exception)
+        {
+            // If the helper cannot start, still run the update; leaving the file is
+            // better than blocking the installation.
+            if (helper is not null)
+            {
+                try { File.Delete(helper); } catch (Exception) { }
+            }
+            Process.Start(new ProcessStartInfo(path, "/SILENT /NORESTART") { UseShellExecute = true });
+        }
+    }
+
+    const string CleanupScript = """
+param([Parameter(Mandatory = $true)][string]$Installer)
+$ErrorActionPreference = 'SilentlyContinue'
+try {
+    $p = Start-Process -FilePath $Installer -ArgumentList '/SILENT', '/NORESTART' -PassThru -ErrorAction Stop
+    if ($p.WaitForExit(1800000) -and $p.ExitCode -eq 0) {
+        Remove-Item -LiteralPath $Installer -Force
+    }
+} catch {
+}
+Remove-Item -LiteralPath $PSCommandPath -Force
+""";
 }

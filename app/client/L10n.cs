@@ -313,6 +313,8 @@ public static class L
                                    "Where the card refuses the country, the 5 GHz AirDrop channel starts passive: the PC sends nothing until it hears an iPhone or a nearby router, so iPhones cannot see it. This scans sooner and more often (at 1.5, 12 and 30 s), only the 11 common channels, so the card learns the country from nearby routers by its own rules. It never transmits on a passive channel. Still being tested. AirDrop restarts for a few seconds when this changes."),
         ["set.updates"] = ("更新", "Updates"),
         ["set.previewUpdates"] = ("包括预览版", "Include preview releases"),
+        ["set.deleteInstaller"] = ("安装完成后自动删除安装包", "Delete the installer after installation"),
+        ["set.deleteInstallerHint"] = ("只在安装成功时删除下载的安装包；安装失败或取消时保留，方便重试。", "Removes the downloaded installer only after a successful install; it is kept after a failure or cancel so you can try again."),
         ["set.updates.hint"] = ("只提示，不会自行安装。安装前会核对 GitHub 公布的 SHA-256。", "Only tells you; never installs on its own. The download is checked against the SHA-256 GitHub publishes."),
         ["update.title"] = ("nekodrop {0} 可用", "nekodrop {0} is available"),
         ["update.body"] = ("点「更新」下载并安装，AirDrop 会重启一会儿。", "Choose Update to download and install it; AirDrop restarts for a moment."),

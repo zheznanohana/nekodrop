@@ -755,7 +755,7 @@ public sealed class App : Application
         if (r is null) return L.T("update.none");
         try
         {
-            var why = await Updater.Install(r, progress);
+            var why = await Updater.Install(r, progress, Settings.DeleteInstallerAfterInstall);
             if (why != "") Shell.DoneToast("update", L.T("update.failed"), why, null);
             return why;
         }
