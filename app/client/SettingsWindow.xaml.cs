@@ -226,6 +226,7 @@ public partial class SettingsWindow : Window
         try
         {
             A.Settings.PreviewUpdates = PreviewUpdatesBox.IsChecked == true;
+            A.Settings.DeleteInstallerAfterInstall = DeleteInstallerBox.IsChecked == true;
             var res = await A.CheckForUpdateDetailed(true);
             switch (res.Status)
             {
