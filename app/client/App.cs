@@ -878,7 +878,7 @@ public sealed class App : Application
     public async Task<Updater.Release?> CheckForUpdate(bool asked) => (await CheckForUpdateDetailed(asked)).Release;
 
     /// <summary>Downloads, verifies and runs the installer of the release found. Returns "" or why not.</summary>
-    public async Task<string> InstallUpdate(IProgress<int>? progress = null)
+    public async Task<string> InstallUpdate(IProgress<Updater.DownloadProgress>? progress = null)
     {
         var r = _update ?? await CheckForUpdate(true);
         if (r is null) return L.T("update.none");

@@ -27,6 +27,8 @@ public static class Updater
 
     public sealed record Release(Version Version, string Tag, string Url, string Sha256, bool Preview, string Page);
 
+    public readonly record struct DownloadProgress(int Percent, long BytesPerSecond);
+
     public sealed record CheckResult(
         CheckStatus Status,
         Release? Release = null,
@@ -202,7 +204,7 @@ public static class Updater
     public static async Task<Release?> FindNewer(bool includePreview) => (await Check(includePreview)).Release;
 
     /// <summary>Downloads, verifies and starts the installer. Returns "" or why not.</summary>
-    public static async Task<string> Install(Release r, IProgress<int>? progress = null, bool deleteAfterInstall = true)
+    public static async Task<string> Install(Release r, IProgress<DownloadProgress>? progress = null, bool deleteAfterInstall = true)
     {
         var dir = Path.Combine(Path.GetTempPath(), "nekodrop-update");
         Directory.CreateDirectory(dir);
@@ -216,11 +218,38 @@ public static class Updater
             var buf = new byte[1 << 16];
             long done = 0;
             int n;
-            while ((n = await src.ReadAsync(buf)) > 0)
+            var clock = Stopwatch.StartNew();
+            long lastDone = 0;
+            long lastMs = 0;
+            void Report()
             {
-                await dst.WriteAsync(buf.AsMemory(0, n));
-                done += n;
-                if (total > 0) progress?.Report((int)(done * 100 / total));
+                var now = clock.ElapsedMilliseconds;
+                var elapsed = now - lastMs;
+                if (elapsed < 1) return;
+                var bps = (done - lastDone) * 1000 / elapsed;
+                if (total > 0) progress?.Report(new((int)(done * 100 / total), bps));
+                lastDone = done;
+                lastMs = now;
+            }
+            System.Threading.Timer? timer = null;
+            if (progress is not null)
+                timer = new System.Threading.Timer(_ => { try { Report(); } catch (Exception) { } }, null, 500, 500);
+            try
+            {
+                while ((n = await src.ReadAsync(buf)) > 0)
+                {
+                    await dst.WriteAsync(buf.AsMemory(0, n));
+                    done += n;
+                }
+            }
+            finally
+            {
+                timer?.Dispose();
+            }
+            if (progress is not null && total > 0)
+            {
+                var avg = clock.ElapsedMilliseconds > 0 ? done * 1000 / clock.ElapsedMilliseconds : 0;
+                progress.Report(new(100, avg));
             }
         }
         string hash;

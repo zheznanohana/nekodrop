@@ -243,6 +243,13 @@ public partial class SettingsWindow : Window
         UpdateBar.Progress = progress ?? 0;
     }
 
+    static string FormatSpeed(long bytesPerSecond)
+    {
+        if (bytesPerSecond >= 1024 * 1024)
+            return $"{bytesPerSecond / (1024.0 * 1024.0):0.0} MB/s";
+        return $"{bytesPerSecond / 1024.0:0.0} KB/s";
+    }
+
     async void CheckNow_Click(object sender, RoutedEventArgs e)
     {
         CheckNowButton.IsEnabled = false;
@@ -269,7 +276,8 @@ public partial class SettingsWindow : Window
             if (found is null) { Status(L.T("update.none")); return; }
             var text = L.F("update.found", found.Version.ToString());
             Status(text, progress: 0);
-            var progress = new Progress<int>(p => Status(text + $" {p}%", progress: p / 100.0));
+            var progress = new Progress<Updater.DownloadProgress>(p =>
+                Status($"{text} {p.Percent}% · {FormatSpeed(p.BytesPerSecond)}", progress: p.Percent / 100.0));
             var why = await A.InstallUpdate(progress);
             if (why != "") Status(L.T("update.failed") + ": " + why);
         }
