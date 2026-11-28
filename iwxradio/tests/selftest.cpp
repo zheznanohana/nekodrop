@@ -20,6 +20,7 @@
 #include "../src/wpa3.h"
 #include "../src/sta_he.h"
 #include "../src/sta_mac_nat.h"
+#include "../src/sta_tx_policy.h"
 #include "radio_backend_test.h"
 #include <cstring>
 #include <vector>
@@ -590,6 +591,21 @@ int main(int argc, char **argv) {
         "later BA stalls keep the long backoff, never forever");
   CHECK(awdl::kBaTxLongBackoffUS > awdl::kBaTxFailBackoffUS,
         "the long backoff is longer than the short one");
+
+  /* Host TX queue policy: no station frame may leave the host while the
+   * station is yielded to AWDL or paused, and a stranded queue must not keep
+   * the radio main loop busy after the link leaves Running. */
+  {
+    CHECK(!sta_tx::can_send(false, false, false), "TX policy: a station that is not Running cannot send");
+    CHECK(!sta_tx::can_send(true, true, false), "TX policy: a yielded station cannot send");
+    CHECK(!sta_tx::can_send(true, false, true), "TX policy: a paused station cannot send");
+    CHECK(sta_tx::can_send(true, false, false), "TX policy: a running, unyielded station can send");
+    CHECK(!sta_tx::pending(false, false, false, true, 1), "TX policy: not Running is not busy");
+    CHECK(!sta_tx::pending(true, true, false, true, 1), "TX policy: yielded queue is not busy");
+    CHECK(!sta_tx::pending(true, false, true, true, 1), "TX policy: paused queue is not busy");
+    CHECK(sta_tx::pending(true, false, false, true, 0), "TX policy: host queue is busy");
+    CHECK(sta_tx::pending(true, false, false, false, 1), "TX policy: firmware queue is busy");
+  }
 
   /* Intel station RX Block Ack reordering (PR #93). */
   {

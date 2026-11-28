@@ -21,6 +21,7 @@
 
 #include "iwx_rx_ba.h"
 #include "sta_device.h"
+#include "sta_tx_policy.h"
 #include "tap.h"
 #include "wpa3.h"
 
@@ -68,7 +69,10 @@ public:
   /* Batch TAP TX doorbells across a single inbox drain when TX A-MPDU is active. */
   void begin_tx_batch() { _tx_batching = true; _tx_batch_dirty = false; }
   bool flush_tx();
-  bool tx_pending() const { return !_tx_wait.empty() || _dev.sta_tx_agg_queued() > 0; }
+  bool tx_pending() const {
+    return sta_tx::pending(_state == State::Running, _yield, _yield_paused,
+                           !_tx_wait.empty(), _dev.sta_tx_agg_queued());
+  }
   bool tx_ba_active() const { return _tx_ba_state == TxBaState::Active; }
   /* Timers: call every few milliseconds from the device thread. */
   void tick(uint64_t now_us);

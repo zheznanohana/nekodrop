@@ -1083,7 +1083,12 @@ bool WifiStation::transmit_qos_agg(const uint8_t *da, uint16_t ethertype, const 
 
 bool WifiStation::flush_tx() {
   bool sent_any = false;
-  if (_state == State::Running && _tx_ba_state == TxBaState::Active && _dev.sta_tx_agg_ready()) {
+  if (!sta_tx::can_send(_state == State::Running, _yield, _yield_paused)) {
+    _tx_batch_dirty = false;
+    _tx_batching = false;
+    return false;
+  }
+  if (_tx_ba_state == TxBaState::Active && _dev.sta_tx_agg_ready()) {
     const unsigned cap = _dev.sta_tx_agg_cap();
     unsigned batch = 0;
     while (!_tx_wait.empty() && _dev.sta_tx_agg_queued() < cap) {
@@ -1109,7 +1114,23 @@ bool WifiStation::flush_tx() {
       _tx_batch_dirty = false;
     }
   } else {
+    /* TX Block Ack is gone (DELBA, a failed negotiation, or the firmware
+     * queue disabled): do not leave frames stranded in _tx_wait. Send them
+     * in order on the normal path instead. The old code only cleared the
+     * batch flag here, so a non-empty queue kept tx_pending() true forever
+     * and made the radio main loop spin. */
     _tx_batch_dirty = false;
+    while (!_tx_wait.empty()) {
+      PendingEth p = std::move(_tx_wait.front());
+      _tx_wait.pop_front();
+      if (p.frame.size() < 14) continue;
+      const uint16_t ethertype = be16(p.frame.data() + 12);
+      if (!send_data(p.frame.data(), ethertype, p.frame.data() + 14, p.frame.size() - 14, p.protect)) {
+        _tx_wait.push_front(std::move(p));
+        break;
+      }
+      sent_any = true;
+    }
   }
   _tx_batching = false;
   return sent_any;
