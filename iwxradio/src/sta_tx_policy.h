@@ -7,8 +7,14 @@
 
 namespace sta_tx {
 
+inline constexpr unsigned kHostQueueLimit = 256;
+
 inline bool can_send(bool running, bool yielded, bool paused) {
   return running && !yielded && !paused;
+}
+
+inline bool host_queue_full(unsigned queued) {
+  return queued >= kHostQueueLimit;
 }
 
 inline bool pending(bool running, bool yielded, bool paused, bool host_queue, unsigned firmware_queue) {

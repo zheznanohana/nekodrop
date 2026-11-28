@@ -605,6 +605,8 @@ int main(int argc, char **argv) {
     CHECK(!sta_tx::pending(true, false, true, true, 1), "TX policy: paused queue is not busy");
     CHECK(sta_tx::pending(true, false, false, true, 0), "TX policy: host queue is busy");
     CHECK(sta_tx::pending(true, false, false, false, 1), "TX policy: firmware queue is busy");
+    CHECK(!sta_tx::host_queue_full(sta_tx::kHostQueueLimit - 1), "TX policy: one below the limit has room");
+    CHECK(sta_tx::host_queue_full(sta_tx::kHostQueueLimit), "TX policy: the limit is full");
   }
 
   /* Intel station RX Block Ack reordering (PR #93). */
@@ -644,6 +646,7 @@ int main(int argc, char **argv) {
     CHECK(ba.process(wrap(f14), 2000, emit) && out.size() == 3, "STA RX BA buffers seq 14 with gap at 13");
     ba.flush_expired(2000 + iwx::RxBaReorder::kStallTimeoutUs + 1, emit);
     CHECK(out.size() == 4 && out[3] == 14, "STA RX BA flushes stalled seq 14 after 40 ms timeout");
+    CHECK(ba.timeouts() == 1, "STA RX BA counts a reorder timeout");
     ba.on_delba(ap, 0, emit);
   }
 

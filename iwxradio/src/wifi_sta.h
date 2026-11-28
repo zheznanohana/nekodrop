@@ -92,6 +92,9 @@ public:
   uint64_t tx_bytes() const { return _tx_bytes; }
   /* Unicast only: Windows' multicast (mDNS, SSDP, LLMNR) never gets answers. */
   uint64_t tx_unicast() const { return _tx_unicast; }
+  uint64_t tx_wait_dropped() const { return _tx_wait_dropped; }
+  unsigned tx_wait_queued() const { return static_cast<unsigned>(_tx_wait.size()); }
+  uint64_t rx_reorder_timeouts() const { return _rx_reorder.timeouts(); }
   uint64_t rx_unicast() const { return _rx.unicast; }
   /* Receive Block Ack requests from the AP, answered like AWDL's. */
   bool take_addba(std::vector<uint8_t> &answer);
@@ -239,6 +242,7 @@ private:
   unsigned _tx_ba_tries = 0;
   uint64_t _tx_ba_last_ask = 0;
   bool _tx_batching = false, _tx_batch_dirty = false;
+  uint64_t _tx_wait_dropped = 0;
   struct PendingEth { std::vector<uint8_t> frame; bool protect = false; };
   std::deque<PendingEth> _tx_wait;
   bool transmit_qos_agg(const uint8_t *da, uint16_t ethertype, const uint8_t *payload, size_t len, bool protect, bool kick);

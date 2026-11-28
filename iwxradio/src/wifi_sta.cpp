@@ -1242,7 +1242,11 @@ void WifiStation::on_ethernet(const uint8_t *frame, size_t len) {
       if (_tx_batching) _tx_batch_dirty = true;
       return;
     }
-    if (_tx_wait.size() < 256) _tx_wait.push_back({std::vector<uint8_t>(frame, frame + len), protect});
+    if (sta_tx::host_queue_full(static_cast<unsigned>(_tx_wait.size()))) {
+      _tx_wait_dropped++;
+    } else {
+      _tx_wait.push_back({std::vector<uint8_t>(frame, frame + len), protect});
+    }
     return;
   }
   send_data(frame, ethertype, payload, payload_len, protect);
