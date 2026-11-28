@@ -1902,7 +1902,10 @@ int main(int argc, char **argv) {
                    std::to_string(ws.drops) + ", failed " +
                    std::to_string(ws.failed) + ", write avg " +
                    std::to_string(ws.writes ? ws.total_us / ws.writes : 0) +
-                   " us, max " + std::to_string(ws.max_us) + " us; last rate 0x" +
+                   " us, max " + std::to_string(ws.max_us) + " us; TX wait " +
+                   std::to_string(sta->tx_wait_queued()) + " queued, " +
+                   std::to_string(sta->tx_wait_dropped()) + " dropped; RX reorder " +
+                   std::to_string(sta->rx_reorder_timeouts()) + " timeouts; last rate 0x" +
                    std::to_string(r.last_rate) + " width " + std::to_string(r.last_rate_width) +
                    ", mcs " + std::to_string(r.last_rate_mcs));
           /* Stall watchdog: Windows keeps sending but nearly nothing comes

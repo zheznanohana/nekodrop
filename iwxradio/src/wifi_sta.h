@@ -21,6 +21,7 @@
 
 #include "iwx_rx_ba.h"
 #include "sta_device.h"
+#include "sta_tx_policy.h"
 #include "tap.h"
 #include "wpa3.h"
 
@@ -68,7 +69,10 @@ public:
   /* Batch TAP TX doorbells across a single inbox drain when TX A-MPDU is active. */
   void begin_tx_batch() { _tx_batching = true; _tx_batch_dirty = false; }
   bool flush_tx();
-  bool tx_pending() const { return !_tx_wait.empty() || _dev.sta_tx_agg_queued() > 0; }
+  bool tx_pending() const {
+    return sta_tx::pending(_state == State::Running, _yield, _yield_paused,
+                           !_tx_wait.empty(), _dev.sta_tx_agg_queued());
+  }
   bool tx_ba_active() const { return _tx_ba_state == TxBaState::Active; }
   /* Timers: call every few milliseconds from the device thread. */
   void tick(uint64_t now_us);
@@ -88,6 +92,9 @@ public:
   uint64_t tx_bytes() const { return _tx_bytes; }
   /* Unicast only: Windows' multicast (mDNS, SSDP, LLMNR) never gets answers. */
   uint64_t tx_unicast() const { return _tx_unicast; }
+  uint64_t tx_wait_dropped() const { return _tx_wait_dropped; }
+  unsigned tx_wait_queued() const { return static_cast<unsigned>(_tx_wait.size()); }
+  uint64_t rx_reorder_timeouts() const { return _rx_reorder.timeouts(); }
   uint64_t rx_unicast() const { return _rx.unicast; }
   /* Receive Block Ack requests from the AP, answered like AWDL's. */
   bool take_addba(std::vector<uint8_t> &answer);
@@ -235,6 +242,8 @@ private:
   unsigned _tx_ba_tries = 0;
   uint64_t _tx_ba_last_ask = 0;
   bool _tx_batching = false, _tx_batch_dirty = false;
+  uint64_t _tx_wait_dropped = 0;
+  std::vector<uint8_t> _tx_frame, _tx_translated;
   struct PendingEth { std::vector<uint8_t> frame; bool protect = false; };
   std::deque<PendingEth> _tx_wait;
   bool transmit_qos_agg(const uint8_t *da, uint16_t ethertype, const uint8_t *payload, size_t len, bool protect, bool kick);

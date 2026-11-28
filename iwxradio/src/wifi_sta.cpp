@@ -1060,7 +1060,8 @@ void WifiStation::deliver(const uint8_t *da, const uint8_t *sa, const uint8_t *b
 
 bool WifiStation::transmit_qos_agg(const uint8_t *da, uint16_t ethertype, const uint8_t *payload, size_t len,
                                    bool protect, bool kick) {
-  std::vector<uint8_t> f(26, 0);
+  _tx_frame.assign(26, 0);
+  auto &f = _tx_frame;
   f[0] = 0x88; /* QoS Data */
   f[1] = static_cast<uint8_t>(0x01 | (protect ? 0x40 : 0)); /* ToDS */
   std::memcpy(&f[4], _cfg.bssid, 6);
@@ -1083,7 +1084,12 @@ bool WifiStation::transmit_qos_agg(const uint8_t *da, uint16_t ethertype, const 
 
 bool WifiStation::flush_tx() {
   bool sent_any = false;
-  if (_state == State::Running && _tx_ba_state == TxBaState::Active && _dev.sta_tx_agg_ready()) {
+  if (!sta_tx::can_send(_state == State::Running, _yield, _yield_paused)) {
+    _tx_batch_dirty = false;
+    _tx_batching = false;
+    return false;
+  }
+  if (_tx_ba_state == TxBaState::Active && _dev.sta_tx_agg_ready()) {
     const unsigned cap = _dev.sta_tx_agg_cap();
     unsigned batch = 0;
     while (!_tx_wait.empty() && _dev.sta_tx_agg_queued() < cap) {
@@ -1109,7 +1115,23 @@ bool WifiStation::flush_tx() {
       _tx_batch_dirty = false;
     }
   } else {
+    /* TX Block Ack is gone (DELBA, a failed negotiation, or the firmware
+     * queue disabled): do not leave frames stranded in _tx_wait. Send them
+     * in order on the normal path instead. The old code only cleared the
+     * batch flag here, so a non-empty queue kept tx_pending() true forever
+     * and made the radio main loop spin. */
     _tx_batch_dirty = false;
+    while (!_tx_wait.empty()) {
+      PendingEth p = std::move(_tx_wait.front());
+      _tx_wait.pop_front();
+      if (p.frame.size() < 14) continue;
+      const uint16_t ethertype = be16(p.frame.data() + 12);
+      if (!send_data(p.frame.data(), ethertype, p.frame.data() + 14, p.frame.size() - 14, p.protect)) {
+        _tx_wait.push_front(std::move(p));
+        break;
+      }
+      sent_any = true;
+    }
   }
   _tx_batching = false;
   return sent_any;
@@ -1119,7 +1141,8 @@ bool WifiStation::send_data(const uint8_t *da, uint16_t ethertype, const uint8_t
                             bool protect) {
   const bool qos = _cfg.block_ack.value_or(false) && _ap_wmm && (_ap_ht || _ap_vht) &&
                    ethertype != kEtherEapol && !(da[0] & 1);
-  std::vector<uint8_t> f(qos ? 26 : 24, 0);
+  _tx_frame.assign(qos ? 26 : 24, 0);
+  auto &f = _tx_frame;
   f[0] = qos ? 0x88 : 0x08;
   f[1] = static_cast<uint8_t>(0x01 | (protect ? 0x40 : 0)); /* ToDS */
   std::memcpy(&f[4], _cfg.bssid, 6);
@@ -1201,18 +1224,36 @@ void WifiStation::on_ethernet(const uint8_t *frame, size_t len) {
   const bool unicast = !(frame[0] & 1);
   if (unicast) _tx_unicast++;
   const bool protect = _keys_installed && !plain();
-  std::vector<uint8_t> translated;
+  _tx_translated.clear();
   const uint8_t *payload = frame + 14;
   const size_t payload_len = len - 14;
   if (_mac_nat && (ethertype == 0x0806 ||
                    (ethertype == 0x0800 && sta_mac_nat::payload_is_dhcp(payload, payload_len, true)) ||
                    (ethertype == 0x86dd && payload_len >= 48 && payload[6] == 58))) {
-    translated.assign(frame, frame + len);
-    std::memcpy(translated.data() + 6, _addr.data(), 6);
-    sta_mac_nat::translate_payload(ethertype, translated.data() + 14, payload_len,
+    _tx_translated.assign(frame, frame + len);
+    std::memcpy(_tx_translated.data() + 6, _addr.data(), 6);
+    sta_mac_nat::translate_payload(ethertype, _tx_translated.data() + 14, payload_len,
                                    _tap_mac.data(), _addr.data(), true);
-    frame = translated.data();
-    payload = translated.data() + 14;
+    frame = _tx_translated.data();
+    payload = _tx_translated.data() + 14;
+  }
+  /* The link is paused for an AWDL transfer. Do not put a frame straight into
+   * the firmware aggregate queue with kick=false: flush_tx() holds while
+   * paused, and the un-kicked frame would keep tx_pending() true after resume.
+   * Keep BA-eligible frames in the host queue; flush_tx() sends them once the
+   * link is back. Other frames cannot use _tx_wait (it is the unicast BA path),
+   * so they are dropped while off-channel, like the yielded case above. */
+  if (_yield_paused) {
+    if (unicast && ethertype != kEtherEapol && _tx_ba_state == TxBaState::Active && _dev.sta_tx_agg_ready()) {
+      if (sta_tx::host_queue_full(static_cast<unsigned>(_tx_wait.size()))) {
+        _tx_wait_dropped++;
+      } else {
+        _tx_wait.push_back({std::vector<uint8_t>(frame, frame + len), protect});
+      }
+    } else {
+      _yield_dropped++;
+    }
+    return;
   }
   if (unicast && ethertype != kEtherEapol && _tx_ba_state == TxBaState::Active && _dev.sta_tx_agg_ready()) {
     const unsigned cap = _dev.sta_tx_agg_cap();
@@ -1221,7 +1262,11 @@ void WifiStation::on_ethernet(const uint8_t *frame, size_t len) {
       if (_tx_batching) _tx_batch_dirty = true;
       return;
     }
-    if (_tx_wait.size() < 256) _tx_wait.push_back({std::vector<uint8_t>(frame, frame + len), protect});
+    if (sta_tx::host_queue_full(static_cast<unsigned>(_tx_wait.size()))) {
+      _tx_wait_dropped++;
+    } else {
+      _tx_wait.push_back({std::vector<uint8_t>(frame, frame + len), protect});
+    }
     return;
   }
   send_data(frame, ethertype, payload, payload_len, protect);
