@@ -243,6 +243,7 @@ private:
   uint64_t _tx_ba_last_ask = 0;
   bool _tx_batching = false, _tx_batch_dirty = false;
   uint64_t _tx_wait_dropped = 0;
+  std::vector<uint8_t> _tx_frame, _tx_translated;
   struct PendingEth { std::vector<uint8_t> frame; bool protect = false; };
   std::deque<PendingEth> _tx_wait;
   bool transmit_qos_agg(const uint8_t *da, uint16_t ethertype, const uint8_t *payload, size_t len, bool protect, bool kick);

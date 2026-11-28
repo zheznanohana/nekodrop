@@ -1060,7 +1060,8 @@ void WifiStation::deliver(const uint8_t *da, const uint8_t *sa, const uint8_t *b
 
 bool WifiStation::transmit_qos_agg(const uint8_t *da, uint16_t ethertype, const uint8_t *payload, size_t len,
                                    bool protect, bool kick) {
-  std::vector<uint8_t> f(26, 0);
+  _tx_frame.assign(26, 0);
+  auto &f = _tx_frame;
   f[0] = 0x88; /* QoS Data */
   f[1] = static_cast<uint8_t>(0x01 | (protect ? 0x40 : 0)); /* ToDS */
   std::memcpy(&f[4], _cfg.bssid, 6);
@@ -1140,7 +1141,8 @@ bool WifiStation::send_data(const uint8_t *da, uint16_t ethertype, const uint8_t
                             bool protect) {
   const bool qos = _cfg.block_ack.value_or(false) && _ap_wmm && (_ap_ht || _ap_vht) &&
                    ethertype != kEtherEapol && !(da[0] & 1);
-  std::vector<uint8_t> f(qos ? 26 : 24, 0);
+  _tx_frame.assign(qos ? 26 : 24, 0);
+  auto &f = _tx_frame;
   f[0] = qos ? 0x88 : 0x08;
   f[1] = static_cast<uint8_t>(0x01 | (protect ? 0x40 : 0)); /* ToDS */
   std::memcpy(&f[4], _cfg.bssid, 6);
@@ -1222,18 +1224,18 @@ void WifiStation::on_ethernet(const uint8_t *frame, size_t len) {
   const bool unicast = !(frame[0] & 1);
   if (unicast) _tx_unicast++;
   const bool protect = _keys_installed && !plain();
-  std::vector<uint8_t> translated;
+  _tx_translated.clear();
   const uint8_t *payload = frame + 14;
   const size_t payload_len = len - 14;
   if (_mac_nat && (ethertype == 0x0806 ||
                    (ethertype == 0x0800 && sta_mac_nat::payload_is_dhcp(payload, payload_len, true)) ||
                    (ethertype == 0x86dd && payload_len >= 48 && payload[6] == 58))) {
-    translated.assign(frame, frame + len);
-    std::memcpy(translated.data() + 6, _addr.data(), 6);
-    sta_mac_nat::translate_payload(ethertype, translated.data() + 14, payload_len,
+    _tx_translated.assign(frame, frame + len);
+    std::memcpy(_tx_translated.data() + 6, _addr.data(), 6);
+    sta_mac_nat::translate_payload(ethertype, _tx_translated.data() + 14, payload_len,
                                    _tap_mac.data(), _addr.data(), true);
-    frame = translated.data();
-    payload = translated.data() + 14;
+    frame = _tx_translated.data();
+    payload = _tx_translated.data() + 14;
   }
   if (unicast && ethertype != kEtherEapol && _tx_ba_state == TxBaState::Active && _dev.sta_tx_agg_ready()) {
     const unsigned cap = _dev.sta_tx_agg_cap();
