@@ -1237,6 +1237,24 @@ void WifiStation::on_ethernet(const uint8_t *frame, size_t len) {
     frame = _tx_translated.data();
     payload = _tx_translated.data() + 14;
   }
+  /* The link is paused for an AWDL transfer. Do not put a frame straight into
+   * the firmware aggregate queue with kick=false: flush_tx() holds while
+   * paused, and the un-kicked frame would keep tx_pending() true after resume.
+   * Keep BA-eligible frames in the host queue; flush_tx() sends them once the
+   * link is back. Other frames cannot use _tx_wait (it is the unicast BA path),
+   * so they are dropped while off-channel, like the yielded case above. */
+  if (_yield_paused) {
+    if (unicast && ethertype != kEtherEapol && _tx_ba_state == TxBaState::Active && _dev.sta_tx_agg_ready()) {
+      if (sta_tx::host_queue_full(static_cast<unsigned>(_tx_wait.size()))) {
+        _tx_wait_dropped++;
+      } else {
+        _tx_wait.push_back({std::vector<uint8_t>(frame, frame + len), protect});
+      }
+    } else {
+      _yield_dropped++;
+    }
+    return;
+  }
   if (unicast && ethertype != kEtherEapol && _tx_ba_state == TxBaState::Active && _dev.sta_tx_agg_ready()) {
     const unsigned cap = _dev.sta_tx_agg_cap();
     if (_tx_wait.empty() && _dev.sta_tx_agg_queued() < cap &&
